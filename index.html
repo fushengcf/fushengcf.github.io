@@ -240,7 +240,7 @@
 
     createApp({
       setup() {
-        const total = ref(50);
+        const total = ref(0);
         const mode = ref("mobile");
         const currentClass = ref("5班");
         const classesData = ref({});
@@ -248,7 +248,7 @@
         const submitted = ref([]);
         const unsubmitted = ref([]);
         const perfectIds = ref(["80517", "80518"]);
-        const correctedIds = ref(["80510"]);
+        const correctedIds = ref(["郑杰"]);
         const scannedSet = reactive(new Set());
         const message = ref("正在加载学生名单...");
         const error = ref("");
@@ -266,12 +266,6 @@
           correctedIds.value.filter(id => scannedSet.has(id)).length
         );
 
-        const rosterMap = computed(() => {
-          const map = new Map();
-          allStudents.value.forEach(s => map.set(s.id, s.name));
-          return map;
-        });
-
         const loadStudents = async () => {
           try {
             const response = await fetch('./students.json');
@@ -285,9 +279,15 @@
         };
 
         const loadClassData = (className) => {
-          const students = classesData.value[className] || [];
+          const names = classesData.value[className] || [];
+          const students = names.map(name => ({
+            id: name,   // 使用姓名作为唯一标识
+            name
+          }));
           allStudents.value = students;
           unsubmitted.value = [...students];
+          submitted.value = [];
+          scannedSet.clear();
           total.value = students.length;
           message.value = "扫码中...";
         };
@@ -337,37 +337,22 @@
         };
 
         const onScanSuccess = text => {
-          const code = (text || "").trim();
-          if (!code) return;
-          
-          // 解析二维码内容，支持JSON格式或纯学号
-          let studentId = code;
-          let studentName = null;
-          
-          try {
-            // 尝试解析JSON格式：{ "id": "80101", "name": "张伟" }
-            const parsed = JSON.parse(code);
-            if (parsed.id) {
-              studentId = parsed.id;
-              studentName = parsed.name || null;
-            }
-          } catch {
-            // 不是JSON格式，当作纯学号处理
-            studentId = code;
-          }
-          
+          const name = (text || "").trim();
+          if (!name) return;
+
+          const studentId = name; // 姓名即唯一标识
+
           // 检查是否已提交
           if (scannedSet.has(studentId)) {
-            message.value = `${rosterMap.value.get(studentId) || studentName || studentId} 已交过，继续扫描`;
+            message.value = `${name} 已交过，继续扫描`;
             flash();
             return;
           }
-          
+
           // 从未提交列表中移除
           const studentIndex = unsubmitted.value.findIndex(s => s.id === studentId);
           if (studentIndex !== -1) {
             const student = unsubmitted.value.splice(studentIndex, 1)[0];
-            // 添加到已提交列表
             scannedSet.add(studentId);
             submitted.value.unshift({
               id: student.id,
@@ -376,14 +361,14 @@
             });
             message.value = `录入成功：${student.name}`;
           } else {
-            // 如果不在名单中，使用二维码中的信息
+            // 不在当前名单中，仍然记录下来
             scannedSet.add(studentId);
             submitted.value.unshift({
               id: studentId,
-              name: studentName || rosterMap.value.get(studentId) || `未知(${studentId})`,
+              name,
               time: new Date().toLocaleTimeString()
             });
-            message.value = `录入成功：${studentName || studentId}`;
+            message.value = `录入成功：${name}`;
           }
         };
 
@@ -415,10 +400,13 @@
           try {
             const text = await file.text();
             const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-            lines.forEach(line => {
-              const [id, name] = line.split(/[,\s]+/);
-              if (id) rosterMap.value.set(id, name || id);
-            });
+            const newStudents = lines.map(name => ({
+              id: name,
+              name
+            }));
+            allStudents.value.push(...newStudents);
+            unsubmitted.value.push(...newStudents);
+            total.value = allStudents.value.length;
             message.value = "名单导入完成";
           } catch (err) {
             error.value = "导入失败：" + (err?.message || err);
